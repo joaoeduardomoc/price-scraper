@@ -5,7 +5,7 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 from dotenv import load_dotenv
 
-load_dotenv()  # Carrega variáveis do arquivo .env
+load_dotenv()  # Load environment variables from .env
 
 SCRAPERAPI_KEY = os.getenv("SCRAPERAPI_KEY")
 
@@ -21,64 +21,64 @@ def connect_db():
         conn = pyodbc.connect(CONN_STRING)
         return conn
     except Exception as e:
-        print(f"Erro ao conectar ao banco de dados: {e}")
+        print(f"Error connecting to the database: {e}")
         raise
 
-def get_produtos(conn):
+def get_products(conn):
     cursor = conn.cursor()
-    cursor.execute("SELECT id_produto, nome_produto, url, seletor_css FROM produtos;")
+    cursor.execute("SELECT product_id, product_name, url, css_selector FROM products;")
     return cursor.fetchall()
 
-def format_price(texto):
-    if not texto:
+def format_price(text):
+    if not text:
         return None
-    texto = texto.strip()
-    texto_limpo = re.sub(r"[^0-9\.,]", "", texto)
-    if texto_limpo.count(",") > 0 and texto_limpo.count(".") > 0:
-        texto_limpo = texto_limpo.replace(".", "").replace(",", ".")
-    elif texto_limpo.count(",") > 0:
-        texto_limpo = texto_limpo.replace(",", ".")
+    text = text.strip()
+    clean_text = re.sub(r"[^0-9\.,]", "", text)
+    if clean_text.count(",") > 0 and clean_text.count(".") > 0:
+        clean_text = clean_text.replace(".", "").replace(",", ".")
+    elif clean_text.count(",") > 0:
+        clean_text = clean_text.replace(",", ".")
     try:
-        return float(texto_limpo)
+        return float(clean_text)
     except:
         return None
 
-def scrape_preco():
+def scrape_price():
     conn = connect_db()
-    produtos = get_produtos(conn)
+    products = get_products(conn)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=False)
         context = browser.new_context()
 
-        for id_produto, nome, url, seletor_css in produtos:
+        for product_id, name, url, css_selector in products:
             page = context.new_page()
             target_url = f"http://api.scraperapi.com/?api_key={SCRAPERAPI_KEY}&url={url}"
             try:
                 page.goto(target_url, timeout=60000)
                 page.wait_for_load_state('networkidle', timeout=30000)
 
-                element = page.wait_for_selector(seletor_css, timeout=30000)
-                texto_preco = element.inner_text()
-                preco = format_price(texto_preco)
+                element = page.wait_for_selector(css_selector, timeout=30000)
+                price_text = element.inner_text()
+                price = format_price(price_text)
 
-                if preco is not None:
+                if price is not None:
                     cursor = conn.cursor()
-                    query_insert = (
-                        "INSERT INTO precos (id_produto, preco, data_coleta) "
+                    insert_query = (
+                        "INSERT INTO prices (product_id, price, scrape_date) "
                         "VALUES (?, ?, ?);"
                     )
-                    data_coleta = datetime.now()
-                    cursor.execute(query_insert, id_produto, preco, data_coleta)
+                    scrape_date = datetime.now()
+                    cursor.execute(insert_query, product_id, price, scrape_date)
                     conn.commit()
-                    print(f"[{data_coleta}] Produto ID {id_produto}: R$ {preco:.2f}")
+                    print(f"[{scrape_date}] Product ID {product_id}: $ {price:.2f}")
                 else:
-                    print(f"Falha ao converter preço para o produto ID {id_produto} (texto: '{texto_preco}')")
+                    print(f"Failed to convert price for product ID {product_id} (text: '{price_text}')")
 
             except PlaywrightTimeoutError:
-                print(f"Timeout: não foi possível encontrar seletor '{seletor_css}' para ID {id_produto} na URL {url}")
+                print(f"Timeout: could not find selector '{css_selector}' for product ID {product_id} at URL {url}")
             except Exception as e:
-                print(f"Erro ao coletar preço para ID {id_produto} na URL {url}: {e}")
+                print(f"Error scraping price for product ID {product_id} at URL {url}: {e}")
             finally:
                 page.close()
 
@@ -86,4 +86,4 @@ def scrape_preco():
     conn.close()
 
 if __name__ == "__main__":
-    scrape_preco()
+    scrape_price()
